@@ -1,3 +1,4 @@
+mod bootrom;
 mod gameboy;
 mod hram;
 mod wram;
