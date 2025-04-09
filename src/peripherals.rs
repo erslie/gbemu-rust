@@ -40,10 +40,29 @@ impl Peripherals {
 
 #[cfg(test)]
 mod test {
+    use std::ffi::FromVecWithNulError;
+
+    use crate::bootrom::Bootrom;
+
+    use super::Peripherals;
+
     //atode
     #[test]
-    fn test_read(){
+    fn test_readwrite_wram() {
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0]));
+        peri.write(0xC000, 0x42);
+        assert_eq!(0x42, peri.read(0xC000));
     }
-    fn test_write(){
+    #[test]
+    fn test_readwrite_hram() {
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0]));
+        peri.write(0xFF80, 0x42);
+        assert_eq!(0x42, peri.read(0xFF80));
+    }
+    #[test]
+    fn test_readwrite_bootrom() {
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0]));
+        peri.write(0xFF50, 1);
+        assert_eq!(false, peri.bootrom.is_active());
     }
 }
