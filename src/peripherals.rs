@@ -40,13 +40,9 @@ impl Peripherals {
 
 #[cfg(test)]
 mod test {
-    use std::ffi::FromVecWithNulError;
-
     use crate::bootrom::Bootrom;
-
     use super::Peripherals;
 
-    //atode
     #[test]
     fn test_readwrite_wram() {
         let mut peri = Peripherals::new(Bootrom::new(vec![0,0]));
