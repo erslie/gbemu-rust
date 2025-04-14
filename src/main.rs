@@ -4,6 +4,7 @@ mod hram;
 mod wram;
 mod peripherals;
 mod register;
+mod operand;
 mod cpu;
 
 fn main() {

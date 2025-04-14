@@ -8,7 +8,7 @@ struct Ctx {
 }
 #[derive(Default)]
 pub struct Cpu {
-    regs: Registres,
+    pub regs: Registres,
     ctx: Ctx,
 }
 impl Cpu {
