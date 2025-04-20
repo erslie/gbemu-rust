@@ -2,14 +2,14 @@ use crate::register::*;
 use crate::peripherals::*;
 
 #[derive(Default)]
-struct Ctx {
+pub struct Ctx {
     opcode: u8,
     cb: bool,
 }
 #[derive(Default)]
 pub struct Cpu {
     pub regs: Registres,
-    ctx: Ctx,
+    pub ctx: Ctx,
 }
 impl Cpu {
     pub fn fetch(&mut self, bus: &Peripherals) {

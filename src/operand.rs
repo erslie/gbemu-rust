@@ -282,3 +282,52 @@ impl IO16<Direct16> for Cpu {
         });
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{cpu::*, operand::Reg16};
+    use crate::operand::IO16;
+    use crate::register::*;
+    use crate::peripherals::Peripherals;
+    use super::{Imm8, Reg8, IO8};
+    use crate::bootrom::*;
+
+    #[test]
+    fn  test_reg8() {
+        let mut cpu = Cpu { regs:Registres::default(), ctx: Ctx::default() };
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0x00]));
+        cpu.write8(&mut peri, Reg8::A, 0x30);
+        assert_eq!(0x30, cpu.read8(&mut peri,Reg8::A).unwrap());
+    }
+    #[test]
+    fn  test_reg16_af() {
+        let mut cpu = Cpu { regs:Registres::default(), ctx: Ctx::default() };
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0x00]));
+        cpu.write16(&mut peri, Reg16::AF, 0b_0011_0011_1010_1111);
+        //Fレジスタが下位4bitを無効化できていれば成功
+        assert_eq!(0b0011_0011_1010_0000, cpu.read16(&mut peri,Reg16::AF).unwrap());
+    }
+    #[test]
+    fn test_reg16_bc() {
+        let mut cpu = Cpu { regs:Registres::default(), ctx: Ctx::default() };
+        let mut peri = Peripherals::new(Bootrom::new(vec![0,0x00]));
+        cpu.write16(&mut peri, Reg16::BC, 0b_0011_0011_1010_1111);
+        assert_eq!(0b0011_0011_1010_1111, cpu.read16(&mut peri,Reg16::BC).unwrap());
+    }
+    #[test]
+    fn test_imm8 () {
+        let mut cpu = Cpu { regs:Registres::default(), ctx: Ctx::default() };
+        //二回呼び出ししないとpcのインクリメントが確認できないから少なくとも2バイトはRomに持たせておく必要がある
+        let mut peri = Peripherals::new(Bootrom::new(vec![0x12,0x34]));
+        let initial_pc = cpu.regs.pc;
+        // 最初の read（None を返すはず）
+        let result1 = cpu.read8(&peri, Imm8);
+        assert_eq!(result1, None);
+        assert_eq!(cpu.regs.pc, initial_pc.wrapping_add(1));
+
+        // 2回目の read（Some(0x12) を返すはず）
+        let result2 = cpu.read8(&peri, Imm8);
+        assert_eq!(result2, Some(0x12));
+        assert_eq!(cpu.regs.pc, initial_pc.wrapping_add(1));
+    }
+}
