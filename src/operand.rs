@@ -1,11 +1,8 @@
 use crate::register::*;
 use crate::peripherals::*;
 use crate::cpu::*;
-use std::sync::atomic::{
-    AtomicU8,
-    AtomicU16,
-    Ordering::Relaxed,
-};
+use std::sync::atomic::*;
+use std::sync::atomic::Ordering::Relaxed;
 
 //マクロである利点はatomic持っておくのとdestinationの型とか？
 //置き換えられそうなら関数にしたい…

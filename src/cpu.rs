@@ -25,10 +25,6 @@ impl Cpu {
         }
     }
 
-    pub fn nop(&mut self, bus: &Peripherals) {
-        self.fetch(bus);//exectuteは次のフェッチが始まることで完了？
-    }
-
     pub fn emulate_cycle(&mut self, bus: &mut Peripherals) {
         self.decode(bus);
     }
