@@ -1,0 +1,10 @@
+[env]
+RUST_BACKTRACE= "1"
+
+[tasks.run]
+description = "cargo run"
+run = "cargo run"
+
+[tasks.build]
+description = "cargo build"
+run = "cargo build"

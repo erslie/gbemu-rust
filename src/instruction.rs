@@ -257,7 +257,7 @@ impl Cpu {
         }
     }
 
-    pub fn fr_c(&mut self, bus: &Peripherals, c: Cond) {
+    pub fn jr_c(&mut self, bus: &Peripherals, c: Cond) {
         step!((), {
             0: if let Some(v) = self.read8(bus, Imm8) {
                 go!(1);
