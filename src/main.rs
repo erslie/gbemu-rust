@@ -6,8 +6,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 
-use crate::bootrom::Bootrom;
-use crate::gameboy::GameBoy;
+use gbemu_rust::bootrom::Bootrom;
+use gbemu_rust::gameboy::GameBoy;
+use gbemu_rust::cartridge::Cartridge;
 
 fn main() {
     //gameboy::run();
@@ -19,7 +20,8 @@ fn main() {
     println!("load to {:?}", bootrom_path);
     let boot_vec = file2vec(&"asset/dmg_bootrom.bin".to_string());
     let bootrom = Bootrom::new(boot_vec);
-    let mut gb = GameBoy::new(bootrom);
+    let cartridge = Cartridge::new();
+    let mut gb = GameBoy::new(bootrom, cartridge);
     gb.run();
 }
 

@@ -1,6 +1,7 @@
 use core::panic;
 use std::sync::RwLockReadGuard;
 
+use crate::interruputs::Interrupts;
 use crate::operand::Direct8;
 use crate::operand::Indirect;
 use crate::operand::*;
@@ -12,23 +13,32 @@ use crate::operand::Cond;
 pub struct Ctx {
     opcode: u8,
     cb: bool,
+    int: bool,
 }
+
+#[derive(Default)]
+pub struct ExecutionState {
+    pub step: u8,
+    pub val8: u8,
+    pub val16: u16,
+}
+
 #[derive(Default)]
 pub struct Cpu {
     pub regs: Registres,
+    pub interrupts: Interrupts,
     pub ctx: Ctx,
+    pub exec_state: ExecutionState,
 }
 impl Cpu {
-    pub fn new() -> Self {
-        Self {
-            regs: Registres::default(),
-            ctx: Ctx::default(),
-        }
-    }
-    
     pub fn fetch(&mut self, bus: &Peripherals) {
-        self.ctx.opcode = bus.read(self.regs.pc);
-        self.regs.pc = self.regs.pc.wrapping_add(1);
+        self.ctx.opcode = bus.read(&self.interrupts, self.regs.pc);
+        if self.interrupts.ime && self.interrupts.get_interrupt() > 0 {
+            self.ctx.int = true;
+        } else {
+            self.regs.pc = self.regs.pc.wrapping_add(1);
+            self.ctx.int = false;
+        }
         self.ctx.cb = false;
     }
 
@@ -41,6 +51,10 @@ impl Cpu {
             0x50 => self.ld(bus, Reg8::D, Reg8::B),
             0x60 => self.ld(bus, Reg8::H, Reg8::B),
             0x70 => self.ld(bus, Indirect::HL, Reg8::B),
+            0x80 => self.add(bus, Reg8::B),
+            0x90 => self.sub(bus, Reg8::B),
+            0xA0 => self.and(bus, Reg8::B),
+            0xB0 => self.or(bus, Reg8::B),
             0xE0 => self.ld(bus, Direct8::DFF, Reg8::A),
             0xF0 => self.ld(bus, Reg8::A, Direct8::DFF),
             0x01 => self.ld16(bus, Reg16::BC, Imm16),
@@ -51,6 +65,10 @@ impl Cpu {
             0x51 => self.ld(bus, Reg8::D, Reg8::C),
             0x61 => self.ld(bus, Reg8::H, Reg8::C),
             0x71 => self.ld(bus, Indirect::HL, Reg8::C),
+            0x81 => self.add(bus, Reg8::C),
+            0x91 => self.sub(bus, Reg8::C),
+            0xA1 => self.and(bus, Reg8::C),
+            0xB1 => self.or(bus, Reg8::C),
             0xC1 => self.pop(bus, Reg16::BC),
             0xD1 => self.pop(bus, Reg16::DE),
             0xE1 => self.pop(bus, Reg16::HL),
@@ -63,6 +81,10 @@ impl Cpu {
             0x52 => self.ld(bus, Reg8::D, Reg8::D),
             0x62 => self.ld(bus, Reg8::H, Reg8::D),
             0x72 => self.ld(bus, Indirect::HL, Reg8::D),
+            0x82 => self.add(bus, Reg8::D),
+            0x92 => self.sub(bus, Reg8::D),
+            0xA2 => self.and(bus, Reg8::D),
+            0xB2 => self.or(bus, Reg8::D),
             0xE2 => self.ld(bus, Indirect::CFF, Reg8::A),
             0xF2 => self.ld(bus, Reg8::A, Indirect::CFF),
             0x03 => self.inc16(bus, Reg16::BC),
@@ -73,6 +95,10 @@ impl Cpu {
             0x53 => self.ld(bus, Reg8::D, Reg8::E),
             0x63 => self.ld(bus, Reg8::H, Reg8::E),
             0x73 => self.ld(bus, Indirect::HL, Reg8::E),
+            0x83 => self.add(bus, Reg8::E),
+            0x93 => self.sub(bus, Reg8::E),
+            0xA3 => self.and(bus, Reg8::E),
+            0xB3 => self.or(bus, Reg8::E),
             0x04 => self.inc(bus, Reg8::B),
             0x14 => self.inc(bus, Reg8::D),
             0x24 => self.inc(bus, Reg8::H),
@@ -81,6 +107,10 @@ impl Cpu {
             0x54 => self.ld(bus, Reg8::D, Reg8::H),
             0x64 => self.ld(bus, Reg8::H, Reg8::H),
             0x74 => self.ld(bus, Indirect::HL, Reg8::H),
+            0x84 => self.add(bus, Reg8::H),
+            0x94 => self.sub(bus, Reg8::H),
+            0xA4 => self.and(bus, Reg8::H),
+            0xB4 => self.or(bus, Reg8::H),
             0x05 => self.dec(bus, Reg8::B),
             0x15 => self.dec(bus, Reg8::D),
             0x25 => self.dec(bus, Reg8::H),
@@ -89,6 +119,10 @@ impl Cpu {
             0x55 => self.ld(bus, Reg8::D, Reg8::L),
             0x65 => self.ld(bus, Reg8::H, Reg8::L),
             0x75 => self.ld(bus, Indirect::HL, Reg8::L),
+            0x85 => self.add(bus, Reg8::L),
+            0x95 => self.sub(bus, Reg8::L),
+            0xA5 => self.and(bus, Reg8::L),
+            0xB5 => self.or(bus, Reg8::L),
             0xC5 => self.push(bus, Reg16::BC),
             0xD5 => self.push(bus, Reg16::DE),
             0xE5 => self.push(bus, Reg16::HL),
@@ -100,10 +134,24 @@ impl Cpu {
             0x46 => self.ld(bus, Reg8::B, Indirect::HL),
             0x56 => self.ld(bus, Reg8::D, Indirect::HL),
             0x66 => self.ld(bus, Reg8::H, Indirect::HL),
+            0x86 => self.add(bus, Indirect::HL),
+            0x96 => self.sub(bus, Indirect::HL),
+            0xA6 => self.and(bus, Indirect::HL),
+            0xB6 => self.or(bus, Indirect::HL),
+            0xC6 => self.add(bus, Imm8),
+            0xD6 => self.sub(bus, Imm8),
+            0xE6 => self.and(bus, Imm8),
+            0xF6 => self.or(bus, Imm8),
+            0x07 => self.rlca(bus),
+            0x17 => self.rla(bus),
             0x47 => self.ld(bus, Reg8::B, Reg8::A),
             0x57 => self.ld(bus, Reg8::D, Reg8::A),
             0x67 => self.ld(bus, Reg8::H, Reg8::A),
             0x77 => self.ld(bus, Indirect::HL, Reg8::A),
+            0x87 => self.add(bus, Reg8::A),
+            0x97 => self.sub(bus, Reg8::A),
+            0xA7 => self.and(bus, Reg8::A),
+            0xB7 => self.or(bus, Reg8::A),
             0x08 => self.ld16(bus, Direct16, Reg16::SP),
             0x18 => self.jr(bus),
             0x28 => self.jr_c(bus, Cond::Z),
@@ -112,11 +160,18 @@ impl Cpu {
             0x58 => self.ld(bus, Reg8::E, Reg8::B),
             0x68 => self.ld(bus, Reg8::L, Reg8::B),
             0x78 => self.ld(bus, Reg8::A, Reg8::B),
+            0x88 => self.adc(bus, Reg8::B),
+            0x98 => self.sbc(bus, Reg8::B),
+            0xA8 => self.xor(bus, Reg8::B),
             0xB8 => self.cp(bus, Reg8::B),
+            0xE8 => self.add_sp_e(bus),
             0x49 => self.ld(bus, Reg8::C, Reg8::C),
             0x59 => self.ld(bus, Reg8::E, Reg8::C),
             0x69 => self.ld(bus, Reg8::L, Reg8::C),
             0x79 => self.ld(bus, Reg8::A, Reg8::C),
+            0x89 => self.adc(bus, Reg8::C),
+            0x99 => self.sbc(bus, Reg8::C),
+            0xA9 => self.xor(bus, Reg8::C),
             0xB9 => self.cp(bus, Reg8::C),
             0xC9 => self.ret(bus),
             0x0A => self.ld(bus, Reg8::A, Indirect::BC),
@@ -127,6 +182,9 @@ impl Cpu {
             0x5A => self.ld(bus, Reg8::E, Reg8::D),
             0x6A => self.ld(bus, Reg8::L, Reg8::D),
             0x7A => self.ld(bus, Reg8::A, Reg8::D),
+            0x8A => self.adc(bus, Reg8::D),
+            0x9A => self.sbc(bus, Reg8::D),
+            0xAA => self.xor(bus, Reg8::D),
             0xBA => self.cp(bus, Reg8::D),
             0xEA => self.ld(bus, Direct8::D, Reg8::A),
             0xFA => self.ld(bus, Reg8::A, Direct8::D),
@@ -138,6 +196,9 @@ impl Cpu {
             0x5B => self.ld(bus, Reg8::E, Reg8::E),
             0x6B => self.ld(bus, Reg8::L, Reg8::E),
             0x7B => self.ld(bus, Reg8::A, Reg8::E),
+            0x8B => self.adc(bus, Reg8::E),
+            0x9B => self.sbc(bus, Reg8::E),
+            0xAB => self.xor(bus, Reg8::E),
             0xBB => self.cp(bus, Reg8::E),
             0xCB => self.cb_prefixed(bus),
             0x0C => self.inc(bus, Reg8::C),
@@ -148,6 +209,9 @@ impl Cpu {
             0x5C => self.ld(bus, Reg8::E, Reg8::H),
             0x6C => self.ld(bus, Reg8::L, Reg8::H),
             0x7C => self.ld(bus, Reg8::A, Reg8::H),
+            0x8C => self.adc(bus, Reg8::H),
+            0x9C => self.sbc(bus, Reg8::H),
+            0xAC => self.xor(bus, Reg8::H),
             0xCC => self.cp(bus, Reg8::H),
             0x0D => self.dec(bus, Reg8::C),
             0x1D => self.dec(bus, Reg8::E),
@@ -157,6 +221,9 @@ impl Cpu {
             0x5D => self.ld(bus, Reg8::E, Reg8::L),
             0x6D => self.ld(bus, Reg8::L, Reg8::L),
             0x7D => self.ld(bus, Reg8::A, Reg8::L),
+            0x8D => self.adc(bus, Reg8::L),
+            0x9D => self.sbc(bus, Reg8::L),
+            0xAD => self.xor(bus, Reg8::L),
             0xBD => self.cp(bus, Reg8::L),
             0xCD => self.call(bus),
             0x0E => self.ld(bus, Reg8::C, Imm8),
@@ -167,87 +234,154 @@ impl Cpu {
             0x5E => self.ld(bus, Reg8::E, Indirect::HL),
             0x6E => self.ld(bus, Reg8::L, Indirect::HL),
             0x7E => self.ld(bus, Reg8::A, Indirect::HL),
+            0x8E => self.adc(bus, Indirect::HL),
+            0x9E => self.sbc(bus, Indirect::HL),
+            0xAE => self.xor(bus, Indirect::HL),
             0xBE => self.cp(bus, Indirect::HL),
+            0xCE => self.adc(bus, Imm8),
+            0xDE => self.sbc(bus, Imm8),
+            0xEE => self.xor(bus, Imm8),
             0xFE => self.cp(bus, Imm8),
+            0x0F => self.rrca(bus),
+            0x1F => self.rra(bus),
             0x4F => self.ld(bus, Reg8::C, Reg8::A),
             0x5F => self.ld(bus, Reg8::E, Reg8::A),
             0x6F => self.ld(bus, Reg8::L, Reg8::A),
             0x7F => self.ld(bus, Reg8::A, Reg8::A),
+            0x8F => self.adc(bus, Reg8::A),
+            0x9F => self.sbc(bus, Reg8::A),
+            0xAF => self.xor(bus, Reg8::A),
             0xBF => self.cp(bus, Reg8::A),
+            0x76 => self.halt(bus),
+            0xD9 => self.reti(bus),
+            0xF3 => self.di(bus),
+            0xFB => self.ei(bus),
             _    => panic!("Not implemented: {:02x}", self.ctx.opcode),
         }
     }
 
     pub fn cb_decode(&mut self, bus: &mut Peripherals) {
         match self.ctx.opcode {
+            0x00 => self.rlc(bus, Reg8::B),
             0x10 => self.rl(bus, Reg8::B),
+            0x20 => self.sla(bus, Reg8::B),
             0x40 => self.bit(bus, 0, Reg8::B),
             0x50 => self.bit(bus, 2, Reg8::B),
             0x60 => self.bit(bus, 4, Reg8::B),
             0x70 => self.bit(bus, 6, Reg8::B),
+            0xC0 => self.set(bus, 0, Reg8::B),
+            0xD0 => self.set(bus, 2, Reg8::B),
+            0xE0 => self.set(bus, 4, Reg8::B),
+            0xF0 => self.set(bus, 6, Reg8::B),
+            0x01 => self.rlc(bus, Reg8::C),
             0x11 => self.rl(bus, Reg8::C),
+            0x21 => self.sla(bus, Reg8::C),
             0x41 => self.bit(bus, 0, Reg8::C),
             0x51 => self.bit(bus, 2, Reg8::C),
             0x61 => self.bit(bus, 4, Reg8::C),
             0x71 => self.bit(bus, 6, Reg8::C),
+            0x02 => self.rlc(bus, Reg8::D),
             0x12 => self.rl(bus, Reg8::D),
+            0x22 => self.sla(bus, Reg8::D),
             0x42 => self.bit(bus, 0, Reg8::D),
             0x52 => self.bit(bus, 2, Reg8::D),
             0x62 => self.bit(bus, 4, Reg8::D),
             0x72 => self.bit(bus, 6, Reg8::D),
+            0x03 => self.rlc(bus, Reg8::E),
             0x13 => self.rl(bus, Reg8::E),
+            0x23 => self.sla(bus, Reg8::E),
             0x43 => self.bit(bus, 0, Reg8::E),
             0x53 => self.bit(bus, 2, Reg8::E),
             0x63 => self.bit(bus, 4, Reg8::E),
             0x73 => self.bit(bus, 6, Reg8::E),
+            0x04 => self.rlc(bus, Reg8::H),
             0x14 => self.rl(bus, Reg8::H),
+            0x24 => self.sla(bus, Reg8::H),
             0x44 => self.bit(bus, 0, Reg8::H),
             0x54 => self.bit(bus, 2, Reg8::H),
             0x64 => self.bit(bus, 4, Reg8::H),
             0x74 => self.bit(bus, 6, Reg8::H),
+            0x05 => self.rlc(bus, Reg8::L),
             0x15 => self.rl(bus, Reg8::L),
+            0x25 => self.sla(bus, Reg8::L),
             0x45 => self.bit(bus, 0, Reg8::L),
             0x55 => self.bit(bus, 2, Reg8::L),
             0x65 => self.bit(bus, 4, Reg8::L),
             0x75 => self.bit(bus, 6, Reg8::L),
+            0x06 => self.rlc(bus, Indirect::HL),
             0x16 => self.rl(bus, Indirect::HL),
+            0x26 => self.sla(bus, Indirect::HL),
             0x46 => self.bit(bus, 0, Indirect::HL),
             0x56 => self.bit(bus, 2, Indirect::HL),
             0x66 => self.bit(bus, 4, Indirect::HL),
             0x76 => self.bit(bus, 6, Indirect::HL),
+            0x07 => self.rlc(bus, Reg8::A),
             0x17 => self.rl(bus, Reg8::A),
+            0x27 => self.sla(bus, Reg8::A),
             0x47 => self.bit(bus, 0, Reg8::A),
             0x57 => self.bit(bus, 2, Reg8::A),
             0x67 => self.bit(bus, 4, Reg8::A),
             0x77 => self.bit(bus, 6, Reg8::A),
+            0x08 => self.rrc(bus, Reg8::B),
+            0x18 => self.rr(bus, Reg8::B),
+            0x28 => self.sra(bus, Reg8::B),
+            0x38 => self.srl(bus, Reg8::B),
             0x48 => self.bit(bus, 1, Reg8::B),
             0x58 => self.bit(bus, 3, Reg8::B),
             0x68 => self.bit(bus, 5, Reg8::B),
             0x78 => self.bit(bus, 7, Reg8::B),
+            0x09 => self.rrc(bus, Reg8::C),
+            0x19 => self.rr(bus, Reg8::C),
+            0x29 => self.sra(bus, Reg8::C),
+            0x39 => self.srl(bus, Reg8::C),
             0x49 => self.bit(bus, 1, Reg8::C),
             0x59 => self.bit(bus, 3, Reg8::C),
             0x69 => self.bit(bus, 5, Reg8::C),
             0x79 => self.bit(bus, 7, Reg8::C),
+            0x0A => self.rrc(bus, Reg8::D),
+            0x1A => self.rr(bus, Reg8::D),
+            0x2A => self.sra(bus, Reg8::D),
+            0x3A => self.srl(bus, Reg8::D),
             0x4A => self.bit(bus, 1, Reg8::D),
             0x5A => self.bit(bus, 3, Reg8::D),
             0x6A => self.bit(bus, 5, Reg8::D),
             0x7A => self.bit(bus, 7, Reg8::D),
+            0x0B => self.rrc(bus, Reg8::E),
+            0x1B => self.rr(bus, Reg8::E),
+            0x2B => self.sra(bus, Reg8::E),
+            0x3B => self.srl(bus, Reg8::E),
             0x4B => self.bit(bus, 1, Reg8::E),
             0x5B => self.bit(bus, 3, Reg8::E),
             0x6B => self.bit(bus, 5, Reg8::E),
             0x7B => self.bit(bus, 7, Reg8::E),
+            0x0C => self.rrc(bus, Reg8::H),
+            0x1C => self.rr(bus, Reg8::H),
+            0x2C => self.sra(bus, Reg8::H),
+            0x3C => self.srl(bus, Reg8::H),
             0x4C => self.bit(bus, 1, Reg8::H),
             0x5C => self.bit(bus, 3, Reg8::H),
             0x6C => self.bit(bus, 5, Reg8::H),
             0x7C => self.bit(bus, 7, Reg8::H),
+            0x0D => self.rrc(bus, Reg8::L),
+            0x1D => self.rr(bus, Reg8::L),
+            0x2D => self.sra(bus, Reg8::L),
+            0x3D => self.srl(bus, Reg8::L),
             0x4D => self.bit(bus, 1, Reg8::L),
             0x5D => self.bit(bus, 3, Reg8::L),
             0x6D => self.bit(bus, 5, Reg8::L),
             0x7D => self.bit(bus, 7, Reg8::L),
+            0x0E => self.rrc(bus, Indirect::HL),
+            0x1E => self.rr(bus, Indirect::HL),
+            0x2E => self.sra(bus, Indirect::HL),
+            0x3E => self.srl(bus, Indirect::HL),
             0x4E => self.bit(bus, 1, Indirect::HL),
             0x5E => self.bit(bus, 3, Indirect::HL),
             0x6E => self.bit(bus, 5, Indirect::HL),
             0x7E => self.bit(bus, 7, Indirect::HL),
+            0x0F => self.rrc(bus, Reg8::A),
+            0x1F => self.rr(bus, Reg8::A),
+            0x2F => self.sra(bus, Reg8::A),
+            0x3F => self.srl(bus, Reg8::A),
             0x4F => self.bit(bus, 1, Reg8::A),
             0x5F => self.bit(bus, 3, Reg8::A),
             0x6F => self.bit(bus, 5, Reg8::A),
@@ -263,10 +397,36 @@ impl Cpu {
             self.cb_decode(bus);
         }
     }
-    
 
+    fn call_isr(&mut self, bus: &mut Peripherals) {
+        step!(self, (), {
+            0: if let Some(_) = self.push16(bus, self.regs.pc) {
+                let highest_int: u8 = 1 << self.interrupts.get_interrupt().trailing_zeros();
+                self.interrupts.int_flags &= !highest_int;
+                self.regs.pc = match highest_int {
+                    VBLANK => 0x0040,
+                    STAT   => 0x0048,
+                    TIMER  => 0x0050,
+                    SERIAL => 0x0058,
+                    JOYPAD => 0x0060,
+                    _ => panic!("Invalid interrupt: {:02X}", highest_int),
+                };
+                return go!(self, 1);
+            },
+            1: {
+                self.interrupts.ime = false;
+                go!(self, 0);
+                self.fetch(bus);
+            },
+        });
+    }
+    
     pub fn emulate_cycle(&mut self, bus: &mut Peripherals) {
-        self.decode(bus);
+        if self.ctx.int {
+            self.call_isr(bus);
+        } else {
+            self.decode(bus);
+        }
     }
 }
 

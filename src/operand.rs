@@ -1,25 +1,18 @@
-use crate::register::*;
 use crate::peripherals::*;
 use crate::cpu::*;
-use std::sync::atomic::*;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU16;
 use std::sync::atomic::Ordering::Relaxed;
 
-//マクロである利点はatomic持っておくのとdestinationの型とか？
-//置き換えられそうなら関数にしたい…
 macro_rules! step {
-    ($d:expr, {$($c:tt : $e:expr,)*}) => {
-        static STEP: AtomicU8 = AtomicU8::new(0);
-        #[allow(dead_code)]
-        static VAL8: AtomicU8 = AtomicU8::new(0);
-        #[allow(dead_code)]
-        static VAL16: AtomicU16 = AtomicU16::new(0);
-        $(if STEP.load(Relaxed) == $c { $e })* else { return $d; }
+    ($cpu:ident, $d:expr, {$($c:tt : $e:expr,)*}) => {
+        $(if $cpu.exec_state.step == $c { $e })* else { return $d; }
     };
 } 
 pub(crate) use step;
 macro_rules! go {
-    ($e:expr) => {
-        STEP.store($e, Relaxed) 
+    ($cpu:ident, $d:expr) => {
+        $cpu.exec_state.step = $d;
     }
 }
 pub(crate) use go;
@@ -99,16 +92,16 @@ impl IO16<Reg16> for Cpu {
 
 impl IO8<Imm8> for Cpu {
     fn read8(&mut self, bus:&Peripherals, _: Imm8) -> Option<u8> {
-        step!(None, {
+        step!(self, None, {
             0: {
-                VAL8.store(bus.read(self.regs.pc), Relaxed);
+                self.exec_state.val8 = bus.read(&mut self.interrupts, self.regs.pc);
                 self.regs.pc = self.regs.pc.wrapping_add(1);
-                go!(1);
+                go!(self, 1);
                 return None;
             },
             1: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
+                go!(self, 0);
+                return Some(self.exec_state.val8);
             },
         });
     }
@@ -117,21 +110,20 @@ impl IO8<Imm8> for Cpu {
     }
 }
 
-//lo -> 下位bit hi -> 上位bit?
 impl IO16<Imm16> for Cpu {
     fn read16(&mut self, bus: &Peripherals, _: Imm16) -> Option<u16> {
-        step!(None, {
+        step!(self, None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
+                self.exec_state.val8 = lo;
+                go!(self, 1);
             },
             1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
+                self.exec_state.val16 = u16::from_le_bytes([self.exec_state.val8, hi]);
+                go!(self, 2);
             },
             2: {
-                go!(0);
-                return Some(VAL16.load(Relaxed));
+                go!(self, 0);
+                return Some(self.exec_state.val16);
             },
         });
     }
@@ -143,109 +135,114 @@ impl IO16<Imm16> for Cpu {
 
 impl IO8<Indirect> for Cpu {
     fn read8(&mut self, bus:&Peripherals, src: Indirect) -> Option<u8> {
-        step!(None, {
+        step!(self, None, {
             0: {
-                VAL8.store(match src {
-                    Indirect::BC => bus.read(self.regs.bc()),
-                    Indirect::DE => bus.read(self.regs.de()),
-                    Indirect::HL => bus.read(self.regs.hl()),
-                    Indirect::CFF => bus.read(0xFF00 | (self.regs.c as u16)),
+                self.exec_state.val8 = match src {
+                    Indirect::BC => bus.read(&mut self.interrupts, self.regs.bc()),
+                    Indirect::DE => bus.read(&mut self.interrupts, self.regs.de()),
+                    Indirect::HL => bus.read(&mut self.interrupts, self.regs.hl()),
+                    Indirect::CFF => bus.read(&mut self.interrupts, 0xFF00 | (self.regs.c as u16)),
                     Indirect::HLD => {
                         let addr = self.regs.hl();
                         //sub,addは実際の命令だと読み書きの後に行ってそう…
                         self.regs.write_hl(addr.wrapping_sub(1));
-                        bus.read(addr)
+                        bus.read(&mut self.interrupts, addr)
                     },
                     Indirect::HLI => {
                         let addr = self.regs.hl();
                         self.regs.write_hl(addr.wrapping_add(1));
-                        bus.read(addr)
+                        bus.read(&mut self.interrupts, addr)
                     },
-                }, Relaxed);
-                go!(1);
+                };
+                go!(self, 1);
                 return None;
             },
             1: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
+                go!(self, 0);
+                return Some(self.exec_state.val8);
             },
         });
     }
     
     fn write8(&mut self, bus: &mut Peripherals, dst: Indirect, val: u8) -> Option<()> {
-        step!(None, {
+        step!(self, None, {
             0: {
                 match dst {
-                Indirect::BC => bus.write(self.regs.bc(), val),
-                Indirect::DE => bus.write(self.regs.de(), val),
-                Indirect::HL => bus.write(self.regs.hl(), val),
-                Indirect::CFF => bus.write(0xFF00 | (self.regs.c as u16), val),
+                Indirect::BC => bus.write(&mut self.interrupts, self.regs.bc(), val),
+                Indirect::DE => bus.write(&mut self.interrupts, self.regs.de(), val),
+                Indirect::HL => bus.write(&mut self.interrupts, self.regs.hl(), val),
+                Indirect::CFF => bus.write(&mut self.interrupts, 0xFF00 | (self.regs.c as u16), val),
                 Indirect::HLD => {
                     let addr = self.regs.hl();
                     self.regs.write_hl(addr.wrapping_sub(1));
-                    bus.write(addr, val);
+                    bus.write(&mut self.interrupts, addr, val);
                 },
                 Indirect::HLI => {
                     let addr = self.regs.hl();
                     self.regs.write_hl(addr.wrapping_add(1));
-                    bus.write(addr, val);
+                    bus.write(&mut self.interrupts, addr, val);
                 },
             }
-            go!(1);
+            go!(self, 1);
             return None;
         },
-        1: return Some(go!(0)),
+        1: return Some(go!(self, 0)),
         });
     }
 }
 
 impl IO8<Direct8> for Cpu {
     fn read8(&mut self, bus:&Peripherals, src: Direct8) -> Option<u8> {
-        step!(None, {
+        step!(self, None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
+                self.exec_state.val8 = lo;
+                go!(self, 1);
                 if let Direct8::DFF = src {
-                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
-                    go!(2);
+                    self.exec_state.val16 = 0xFF00 | (lo as u16);
+                    go!(self, 2);
                 }
             },
             1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
+                self.exec_state.val16 = u16::from_le_bytes([self.exec_state.val8, hi]);
+                // VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(self, 2);
             },
             2: {
-                VAL8.store(bus.read(VAL16.load(Relaxed)), Relaxed);
-                go!(3);
+                self.exec_state.val8 = bus.read(&mut self.interrupts, self.exec_state.val16);
+                // VAL8.store(bus.read(&mut self.interrupts, VAL16.load(Relaxed)), Relaxed);
+                go!(self, 3);
                 return None;
             },
             3: {
-                go!(0);
-                return Some(VAL8.load(Relaxed));
+                go!(self, 0);
+                return Some(self.exec_state.val8);
             },
         });
     }
 
     fn write8(&mut self, bus: &mut Peripherals, dst: Direct8, val: u8) -> Option<()> {
-        step!(None, {
+        step!(self, None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
+                self.exec_state.val8 = lo;
+                // VAL8.store(lo, Relaxed);
+                go!(self, 1);
                 if let Direct8::DFF = dst {
-                    VAL16.store(0xFF00 | (lo as u16), Relaxed);
-                    go!(2);
+                    self.exec_state.val16 = 0xff | (lo as u16);
+                    // VAL16.store(0xFF00 | (lo as u16), Relaxed);
+                    go!(self, 2);
                 }
             },
             1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2); 
+                self.exec_state.val16 = u16::from_le_bytes([self.exec_state.val8, hi]);
+                // VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(self, 2); 
             },
             2: {
-                bus.write(VAL16.load(Relaxed), val);
-                go!(3);
+                bus.write(&mut self.interrupts, self.exec_state.val16, val);
+                go!(self, 3);
                 return None;
             },
-            3: return Some(go!(0)),
+            3: return Some(go!(self, 0)),
         });
     }
 }
@@ -256,26 +253,28 @@ impl IO16<Direct16> for Cpu {
     }
 
     fn write16(&mut self, bus: &mut Peripherals, dst: Direct16, val: u16) -> Option<()> {
-        step!(None, {
+        step!(self, None, {
             0: if let Some(lo) = self.read8(bus, Imm8) {
-                VAL8.store(lo, Relaxed);
-                go!(1);
+                self.exec_state.val8 = lo;
+                // VAL8.store(lo, Relaxed);
+                go!(self, 1);
             },
             1: if let Some(hi) = self.read8(bus, Imm8) {
-                VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
-                go!(2);
+                self.exec_state.val16 = u16::from_le_bytes([self.exec_state.val8, hi]);
+                // VAL16.store(u16::from_le_bytes([VAL8.load(Relaxed), hi]), Relaxed);
+                go!(self, 2);
             },
             2: {
-                bus.write(VAL16.load(Relaxed), val as u8);
-                go!(3);
+                bus.write(&mut self.interrupts, self.exec_state.val16, val as u8);
+                go!(self, 3);
                 return None;
             },
             3: {
-                bus.write(VAL16.load(Relaxed).wrapping_add(1), (val >> 8) as u8);
-                go!(4);
+                bus.write(&mut self.interrupts, self.exec_state.val16.wrapping_add(1), (val >> 8) as u8);
+                go!(self, 4);
                 return None;
             },
-            4: return Some(go!(0)),
+            4: return Some(go!(self, 0)),
         });
     }
 }
