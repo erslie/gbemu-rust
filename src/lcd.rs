@@ -16,7 +16,7 @@ impl LCD {
             .position_centered()
             .build()
             .unwrap();
-        let mut canvas = window.into_canvas().build().unwrap();
+        let  canvas = window.into_canvas().build().unwrap();
         Self(canvas)
     }
 
@@ -29,5 +29,6 @@ impl LCD {
         self.0.clear();
         self.0.copy(&texture, None, None).unwrap();
         self.0.present();
+        println!("DRAW CALLED!");
     }
 }

@@ -51,7 +51,11 @@ impl Peripherals {
                 0xA000..=0xBFFF => self.cartridge.write(addr, val),
                 0x8000..=0x9FFF => self.ppu.write(addr, val),
                 0xFE00..=0xFE9F => self.ppu.write(addr, val),
-                0xFF40..=0xFF4B => self.ppu.write(addr, val),
+                // 0xFF40..=0xFF4B => self.ppu.write(addr, val),
+                0xFF40..=0xFF4B => {
+                    println!("I/O WRITE: Addr={:#06x}, Val={:#04x}", addr, val);
+                    self.ppu.write(addr, val);
+                },
                 0xC000..=0xFDFF => self.wram.write(addr,val),
                 0xFF50          => self.bootrom.write(addr, val),
                 0xFF80..=0xFFFE  => self.hram.write(addr, val),

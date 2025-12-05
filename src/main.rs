@@ -3,7 +3,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use core::panic;
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::PathBuf;
 
 use gbemu_rust::bootrom::Bootrom;
@@ -12,7 +12,6 @@ use gbemu_rust::cartridge::Cartridge;
 
 fn main() {
     //gameboy::run();
-    // test_sdl2();
     unsafe {
         backtrace_on_stack_overflow::enable();
     }
@@ -20,7 +19,8 @@ fn main() {
     println!("load to {:?}", bootrom_path);
     let boot_vec = file2vec(&"asset/dmg_bootrom.bin".to_string());
     let bootrom = Bootrom::new(boot_vec);
-    let cartridge = Cartridge::new();
+    let cartridge_box = file_to_boxed_slice(&"asset/cpu_instrs.gb").unwrap();
+    let cartridge = Cartridge::new(cartridge_box);
     let mut gb = GameBoy::new(bootrom, cartridge);
     gb.run();
 }
@@ -33,6 +33,12 @@ fn file2vec(fname: &String) -> Vec<u8> {
     } else {
         panic!("Cannot open {}", fname);
     }
+}
+
+fn file_to_boxed_slice(path: &str) -> io::Result<Box<[u8]>> {
+    let vec_data = file2vec(&path.to_string());
+    let boxed_slice:Box<[u8]> = vec_data.into_boxed_slice();
+    Ok(boxed_slice)
 }
 
 fn test_sdl2() {

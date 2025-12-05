@@ -31,13 +31,20 @@ impl GameBoy {
         let time = time::Instant::now();
         let mut elapsed = 0;
         loop {
+
+            // let lcdc_val = self.peripherals.read(&mut self.cpu.interrupts,0xFF40);
+            // let ly_val = self.peripherals.read(&mut self.cpu.interrupts, 0xFF44);
+            // if ly_val & 10 == 0 {
+            //     println!("LCDC: {:#04X}, LY: {}", lcdc_val, ly_val);
+            // }
+
             let e = time.elapsed().as_nanos();
             for _ in 0..(e - elapsed) / M_CYCLE_NANOS {
                 self.cpu.emulate_cycle(&mut self.peripherals);
                 if self.peripherals.ppu.emulate_cycle() {
                     self.lcd.draw(self.peripherals.ppu.pixel_buffer());
                 }
-                println!("{}", elapsed);
+                // println!("{}", elapsed);
                 elapsed += M_CYCLE_NANOS;
             }
         }

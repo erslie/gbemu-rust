@@ -10,11 +10,6 @@ use crate::operand::{
     step,
     go,
 };
-use std::sync::atomic::{
-    AtomicU8, 
-    AtomicU16, 
-    Ordering::Relaxed,
-};
 
 
 impl Cpu {

@@ -1,8 +1,5 @@
 use crate::peripherals::*;
 use crate::cpu::*;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::AtomicU16;
-use std::sync::atomic::Ordering::Relaxed;
 
 macro_rules! step {
     ($cpu:ident, $d:expr, {$($c:tt : $e:expr,)*}) => {
@@ -186,7 +183,10 @@ impl IO8<Indirect> for Cpu {
             go!(self, 1);
             return None;
         },
-        1: return Some(go!(self, 0)),
+            1: {
+                go!(self, 0);
+                return Some(());
+            },
         });
     }
 }
@@ -242,7 +242,10 @@ impl IO8<Direct8> for Cpu {
                 go!(self, 3);
                 return None;
             },
-            3: return Some(go!(self, 0)),
+            3:{
+                go!(self, 0);
+                return Some(());
+            },
         });
     }
 }
